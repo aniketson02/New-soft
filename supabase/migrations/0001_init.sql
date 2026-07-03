@@ -215,6 +215,7 @@ $$;
 
 alter publication supabase_realtime add table public.items;
 alter publication supabase_realtime add table public.proposals;
+alter publication supabase_realtime add table public.captures;
 
 -- ---------------------------------------------------------------------------
 -- Storage bucket for photo/voice captures

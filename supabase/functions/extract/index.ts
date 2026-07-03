@@ -1,7 +1,9 @@
-// Hearth extraction pipeline (Phase 2).
+// Hearth extraction pipeline.
 //
-// Triggered by a database webhook on INSERT into `captures`. Reads the raw
-// capture (text for now; photo/voice next), asks Claude to extract structured
+// Invoked directly from the app after a capture is created
+// (supabase.functions.invoke('extract', { body: { capture_id } })), and also
+// compatible with a Database Webhook payload ({ record }). Reads the raw
+// capture (text or photo), asks Claude to extract structured
 // events/tasks/list entries, and writes them to `proposals` for one-tap
 // review in the app.
 //
@@ -9,14 +11,13 @@
 //   ANTHROPIC_API_KEY  — Claude API key
 //
 // Deploy: supabase functions deploy extract
-// Wire up: Database Webhooks → captures INSERT → this function.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const EXTRACTION_TOOL = {
   name: 'record_extracted_items',
   description:
-    'Record the events, tasks, and shopping/list entries found in a family note or message.',
+    'Record the events, tasks, and shopping/list entries found in a family note, message, or photographed flyer.',
   input_schema: {
     type: 'object',
     properties: {
@@ -53,22 +54,75 @@ const EXTRACTION_TOOL = {
   },
 } as const;
 
+const INSTRUCTIONS = (now: string) =>
+  `Today is ${now}. Extract every concrete event, task, and shopping/list item ` +
+  `from this family note or photo. Resolve relative dates ("next Thursday") to ` +
+  `ISO datetimes. Do not invent items. If there is nothing actionable, record an empty list.`;
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 Deno.serve(async (req) => {
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
-  const { record: capture } = await req.json();
-  if (!capture?.id) {
-    return new Response(JSON.stringify({ error: 'no capture in payload' }), { status: 400 });
+  const body = await req.json().catch(() => ({}));
+  const captureId: string | undefined = body?.capture_id ?? body?.record?.id;
+  if (!captureId) {
+    return new Response(JSON.stringify({ error: 'no capture_id in payload' }), { status: 400 });
   }
 
-  await supabase.from('captures').update({ status: 'processing' }).eq('id', capture.id);
+  const { data: capture, error: captureError } = await supabase
+    .from('captures')
+    .select('*')
+    .eq('id', captureId)
+    .single();
+  if (captureError || !capture) {
+    return new Response(JSON.stringify({ error: 'capture not found' }), { status: 404 });
+  }
+  if (capture.status === 'done' || capture.status === 'processing') {
+    return new Response(JSON.stringify({ skipped: capture.status }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  await supabase.from('captures').update({ status: 'processing', error: null }).eq('id', capture.id);
 
   try {
-    if (capture.kind !== 'text' || !capture.text_content) {
-      // Photo (vision) and voice (transcription) ingestion land here next.
+    const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+    if (!apiKey) {
+      throw new Error(
+        'AI is not configured yet: run `supabase secrets set ANTHROPIC_API_KEY=...`',
+      );
+    }
+
+    let userContent: unknown;
+    if (capture.kind === 'text' && capture.text_content) {
+      userContent = `${INSTRUCTIONS(new Date().toISOString())}\n\n---\n${capture.text_content}`;
+    } else if (capture.kind === 'photo' && capture.storage_path) {
+      const { data: file, error: downloadError } = await supabase.storage
+        .from('captures')
+        .download(capture.storage_path);
+      if (downloadError || !file) {
+        throw new Error(`could not download photo: ${downloadError?.message}`);
+      }
+      const base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
+      userContent = [
+        {
+          type: 'image',
+          source: { type: 'base64', media_type: 'image/jpeg', data: base64 },
+        },
+        { type: 'text', text: INSTRUCTIONS(new Date().toISOString()) },
+      ];
+    } else {
       throw new Error(`capture kind "${capture.kind}" not supported yet`);
     }
 
@@ -76,7 +130,7 @@ Deno.serve(async (req) => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-api-key': Deno.env.get('ANTHROPIC_API_KEY')!,
+        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
@@ -84,16 +138,7 @@ Deno.serve(async (req) => {
         max_tokens: 2048,
         tools: [EXTRACTION_TOOL],
         tool_choice: { type: 'tool', name: 'record_extracted_items' },
-        messages: [
-          {
-            role: 'user',
-            content:
-              `Today is ${new Date().toISOString()}. Extract every concrete event, task, ` +
-              `and shopping/list item from this family note. Resolve relative dates ` +
-              `("next Thursday") to ISO datetimes. Do not invent items.\n\n---\n` +
-              capture.text_content,
-          },
-        ],
+        messages: [{ role: 'user', content: userContent }],
       }),
     });
 
@@ -121,10 +166,11 @@ Deno.serve(async (req) => {
       headers: { 'content-type': 'application/json' },
     });
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     await supabase
       .from('captures')
-      .update({ status: 'error', error: String(err) })
+      .update({ status: 'error', error: message.slice(0, 500) })
       .eq('id', capture.id);
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500 });
+    return new Response(JSON.stringify({ error: message }), { status: 500 });
   }
 });

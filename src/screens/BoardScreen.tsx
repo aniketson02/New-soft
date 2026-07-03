@@ -12,6 +12,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import { useAppState } from '../context/AppState';
+import Avatar from '../components/Avatar';
 import type { Item, Member } from '../types';
 import { colors, spacing } from '../theme';
 import type { RootStackParamList } from '../navigation';
@@ -28,7 +29,7 @@ function endOfToday(): Date {
 
 function endOfWeek(): Date {
   const d = endOfToday();
-  d.setDate(d.getDate() + (7 - d.getDay() || 7) - 1 + 1);
+  d.setDate(d.getDate() + 6);
   return d;
 }
 
@@ -57,36 +58,55 @@ function sectionize(items: Item[]): Section[] {
   ].filter((s) => s.items.length > 0);
 }
 
-function ownerName(item: Item, members: Member[]): string | null {
+function owner(item: Item, members: Member[]): Member | null {
   if (!item.owner_member_id) return null;
-  return members.find((m) => m.id === item.owner_member_id)?.display_name ?? null;
+  return members.find((m) => m.id === item.owner_member_id) ?? null;
 }
 
 export default function BoardScreen({ navigation }: Props) {
-  const { family, members, signOut } = useAppState();
+  const { family, member, members, signOut } = useAppState();
   const [items, setItems] = useState<Item[]>([]);
+  const [pendingReviews, setPendingReviews] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     if (!family) return;
-    const { data, error } = await supabase
-      .from('items')
-      .select('*')
-      .eq('family_id', family.id)
-      .eq('status', 'open')
-      .neq('type', 'list_entry')
-      .order('due_at', { ascending: true, nullsFirst: false });
-    if (!error) setItems((data as Item[]) ?? []);
+    const [{ data: itemRows }, { count }] = await Promise.all([
+      supabase
+        .from('items')
+        .select('*')
+        .eq('family_id', family.id)
+        .eq('status', 'open')
+        .neq('type', 'list_entry')
+        .order('due_at', { ascending: true, nullsFirst: false }),
+      supabase
+        .from('proposals')
+        .select('id', { count: 'exact', head: true })
+        .eq('family_id', family.id)
+        .eq('status', 'pending'),
+    ]);
+    setItems((itemRows as Item[]) ?? []);
+    setPendingReviews(count ?? 0);
   }, [family]);
 
   useEffect(() => {
     load();
     if (!family) return;
     const channel = supabase
-      .channel(`items-${family.id}`)
+      .channel(`board-${family.id}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'items', filter: `family_id=eq.${family.id}` },
+        () => load(),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'proposals',
+          filter: `family_id=eq.${family.id}`,
+        },
         () => load(),
       )
       .subscribe();
@@ -94,6 +114,12 @@ export default function BoardScreen({ navigation }: Props) {
       supabase.removeChannel(channel);
     };
   }, [family, load]);
+
+  // Reload when returning from modal screens (accept/dismiss/add).
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', load);
+    return unsub;
+  }, [navigation, load]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -121,20 +147,44 @@ export default function BoardScreen({ navigation }: Props) {
   };
 
   const sections = useMemo(() => sectionize(items), [items]);
+  const now = Date.now();
+  const todayLabel = new Date().toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.greeting}>
+            {member ? `Hi ${member.display_name} · ` : ''}
+            {todayLabel}
+          </Text>
           <Text style={styles.familyName}>{family?.name}</Text>
           <TouchableOpacity onPress={shareInvite}>
             <Text style={styles.invite}>Invite code: {family?.invite_code} · share</Text>
           </TouchableOpacity>
         </View>
-        <TouchableOpacity onPress={signOut}>
-          <Text style={styles.signOut}>Sign out</Text>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity onPress={() => navigation.navigate('Lists')}>
+            <Text style={styles.headerLink}>🛒 Lists</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={signOut}>
+            <Text style={styles.signOut}>Sign out</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {pendingReviews > 0 && (
+        <TouchableOpacity style={styles.banner} onPress={() => navigation.navigate('Review')}>
+          <Text style={styles.bannerText}>
+            ✨ Hearth organized {pendingReviews} {pendingReviews === 1 ? 'thing' : 'things'} for
+            you — tap to review
+          </Text>
+        </TouchableOpacity>
+      )}
 
       <ScrollView
         style={styles.scroll}
@@ -144,7 +194,8 @@ export default function BoardScreen({ navigation }: Props) {
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>Nothing on the board yet</Text>
             <Text style={styles.emptyText}>
-              Add something below, or capture a note and let Hearth organize it.
+              Capture a note or a photo of a flyer and let Hearth organize it — or add
+              something yourself.
             </Text>
           </View>
         )}
@@ -153,7 +204,8 @@ export default function BoardScreen({ navigation }: Props) {
           <View key={section.title} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.title}</Text>
             {section.items.map((item) => {
-              const owner = ownerName(item, members);
+              const own = owner(item, members);
+              const overdue = item.due_at ? new Date(item.due_at).getTime() < now : false;
               return (
                 <View key={item.id} style={styles.card}>
                   <TouchableOpacity style={styles.check} onPress={() => markDone(item)}>
@@ -164,7 +216,7 @@ export default function BoardScreen({ navigation }: Props) {
                       {item.type === 'event' ? '📅 ' : ''}
                       {item.title}
                     </Text>
-                    <Text style={styles.cardMeta}>
+                    <Text style={[styles.cardMeta, overdue && styles.overdue]}>
                       {[
                         item.due_at
                           ? new Date(item.due_at).toLocaleString(undefined, {
@@ -173,14 +225,15 @@ export default function BoardScreen({ navigation }: Props) {
                               day: 'numeric',
                               hour: 'numeric',
                               minute: '2-digit',
-                            })
+                            }) + (overdue ? ' · overdue' : '')
                           : null,
-                        owner,
+                        own ? null : 'anyone',
                       ]
                         .filter(Boolean)
-                        .join(' · ') || 'Anytime · anyone'}
+                        .join(' · ') || 'Anytime'}
                     </Text>
                   </View>
+                  {own && <Avatar memberId={own.id} name={own.display_name} />}
                 </View>
               );
             })}
@@ -211,11 +264,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     padding: spacing.md,
-    paddingTop: spacing.lg,
+    paddingTop: spacing.xl,
   },
-  familyName: { fontSize: 24, fontWeight: '800', color: colors.text },
-  invite: { color: colors.primaryDark, marginTop: 2, fontSize: 13 },
-  signOut: { color: colors.muted, fontSize: 13, marginTop: 6 },
+  greeting: { color: colors.muted, fontSize: 13 },
+  familyName: { fontSize: 26, fontWeight: '800', color: colors.text, marginTop: 2 },
+  invite: { color: colors.primaryDark, marginTop: 4, fontSize: 13 },
+  headerActions: { alignItems: 'flex-end', gap: spacing.sm },
+  headerLink: { color: colors.primaryDark, fontWeight: '700', fontSize: 15 },
+  signOut: { color: colors.muted, fontSize: 13 },
+  banner: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    padding: spacing.md,
+  },
+  bannerText: { color: '#fff', fontWeight: '700', textAlign: 'center' },
   scroll: { flex: 1, paddingHorizontal: spacing.md },
   empty: { alignItems: 'center', marginTop: spacing.xl * 2, gap: spacing.sm },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
@@ -244,6 +308,7 @@ const styles = StyleSheet.create({
   cardBody: { flex: 1 },
   cardTitle: { fontSize: 16, fontWeight: '600', color: colors.text },
   cardMeta: { fontSize: 13, color: colors.muted, marginTop: 2 },
+  overdue: { color: colors.danger, fontWeight: '600' },
   fabRow: {
     position: 'absolute',
     bottom: spacing.lg,

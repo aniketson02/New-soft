@@ -9,6 +9,8 @@ import FamilySetupScreen from './src/screens/FamilySetupScreen';
 import BoardScreen from './src/screens/BoardScreen';
 import AddItemScreen from './src/screens/AddItemScreen';
 import CaptureScreen from './src/screens/CaptureScreen';
+import ReviewScreen from './src/screens/ReviewScreen';
+import ListsScreen from './src/screens/ListsScreen';
 import type { RootStackParamList } from './src/navigation';
 import { colors } from './src/theme';
 
@@ -48,6 +50,12 @@ function Root() {
         component={CaptureScreen}
         options={{ title: 'Capture', presentation: 'modal' }}
       />
+      <Stack.Screen
+        name="Review"
+        component={ReviewScreen}
+        options={{ title: 'Review suggestions' }}
+      />
+      <Stack.Screen name="Lists" component={ListsScreen} options={{ title: 'Lists' }} />
     </Stack.Navigator>
   );
 }
