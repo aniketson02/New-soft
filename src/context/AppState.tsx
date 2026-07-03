@@ -1,0 +1,99 @@
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import type { Session } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
+import type { Family, Member } from '../types';
+
+interface AppState {
+  loading: boolean;
+  session: Session | null;
+  family: Family | null;
+  member: Member | null;
+  members: Member[];
+  refreshFamily: () => Promise<void>;
+  signOut: () => Promise<void>;
+}
+
+const AppStateContext = createContext<AppState | undefined>(undefined);
+
+export function AppStateProvider({ children }: { children: React.ReactNode }) {
+  const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState<Session | null>(null);
+  const [family, setFamily] = useState<Family | null>(null);
+  const [member, setMember] = useState<Member | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
+
+  const loadFamily = useCallback(async (userId: string) => {
+    const { data: myMember } = await supabase
+      .from('members')
+      .select('*')
+      .eq('user_id', userId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!myMember) {
+      setFamily(null);
+      setMember(null);
+      setMembers([]);
+      return;
+    }
+
+    setMember(myMember as Member);
+
+    const [{ data: fam }, { data: all }] = await Promise.all([
+      supabase.from('families').select('*').eq('id', myMember.family_id).single(),
+      supabase.from('members').select('*').eq('family_id', myMember.family_id),
+    ]);
+
+    setFamily((fam as Family) ?? null);
+    setMembers((all as Member[]) ?? []);
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data }) => {
+      setSession(data.session);
+      if (data.session) await loadFamily(data.session.user.id);
+      setLoading(false);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, s) => {
+      setSession(s);
+      if (s) {
+        await loadFamily(s.user.id);
+      } else {
+        setFamily(null);
+        setMember(null);
+        setMembers([]);
+      }
+    });
+
+    return () => sub.subscription.unsubscribe();
+  }, [loadFamily]);
+
+  const refreshFamily = useCallback(async () => {
+    if (session) await loadFamily(session.user.id);
+  }, [session, loadFamily]);
+
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
+  }, []);
+
+  const value = useMemo(
+    () => ({ loading, session, family, member, members, refreshFamily, signOut }),
+    [loading, session, family, member, members, refreshFamily, signOut],
+  );
+
+  return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
+}
+
+export function useAppState(): AppState {
+  const ctx = useContext(AppStateContext);
+  if (!ctx) throw new Error('useAppState must be used inside AppStateProvider');
+  return ctx;
+}
