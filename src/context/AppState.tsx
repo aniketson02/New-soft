@@ -9,6 +9,7 @@ import React, {
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { track } from '../lib/analytics';
+import { captureInviteFromUrl, clearPendingInvite } from '../lib/inviteLink';
 import type { Family, Member } from '../types';
 
 interface AppState {
@@ -20,6 +21,9 @@ interface AppState {
   /** True when the family has no captures and no items yet — show the
    * guided first-capture onboarding instead of an empty board. */
   needsOnboarding: boolean;
+  /** Invite code captured from a ?join= link, pending until used. */
+  pendingInvite: string | null;
+  clearInvite: () => void;
   refreshFamily: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -33,6 +37,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [member, setMember] = useState<Member | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [pendingInvite, setPendingInvite] = useState<string | null>(null);
+
+  useEffect(() => {
+    captureInviteFromUrl().then(setPendingInvite);
+  }, []);
+
+  const clearInvite = useCallback(() => {
+    setPendingInvite(null);
+    clearPendingInvite();
+  }, []);
 
   const loadFamily = useCallback(async (userId: string) => {
     const { data: myMember } = await supabase
@@ -101,8 +115,30 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ loading, session, family, member, members, needsOnboarding, refreshFamily, signOut }),
-    [loading, session, family, member, members, needsOnboarding, refreshFamily, signOut],
+    () => ({
+      loading,
+      session,
+      family,
+      member,
+      members,
+      needsOnboarding,
+      pendingInvite,
+      clearInvite,
+      refreshFamily,
+      signOut,
+    }),
+    [
+      loading,
+      session,
+      family,
+      member,
+      members,
+      needsOnboarding,
+      pendingInvite,
+      clearInvite,
+      refreshFamily,
+      signOut,
+    ],
   );
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;

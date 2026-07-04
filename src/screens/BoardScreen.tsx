@@ -12,6 +12,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import { track } from '../lib/analytics';
+import { inviteUrl } from '../lib/inviteLink';
 import { useAppState } from '../context/AppState';
 import Avatar from '../components/Avatar';
 import type { Item, Member } from '../types';
@@ -144,7 +145,9 @@ export default function BoardScreen({ navigation }: Props) {
     if (!family) return;
     track('invite_shared');
     await Share.share({
-      message: `Join our family space "${family.name}" on Hearth — invite code: ${family.invite_code}. Open it at https://aniketson02.github.io/New-soft/`,
+      message:
+        `Join our family space "${family.name}" on Hearth — one tap: ` +
+        `${inviteUrl(family.invite_code)} (or use code ${family.invite_code})`,
     });
   };
 

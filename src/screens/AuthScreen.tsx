@@ -11,9 +11,11 @@ import {
   View,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { useAppState } from '../context/AppState';
 import { colors, spacing } from '../theme';
 
 export default function AuthScreen() {
+  const { pendingInvite } = useAppState();
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [codeSent, setCodeSent] = useState(false);
@@ -54,6 +56,12 @@ export default function AuthScreen() {
     >
       <Text style={styles.logo}>Hearth</Text>
       <Text style={styles.tagline}>The chief-of-staff for your household.</Text>
+
+      {pendingInvite ? (
+        <Text style={styles.invited}>
+          🎉 You've been invited to a family — sign in to join them.
+        </Text>
+      ) : null}
 
       {!codeSent ? (
         <View style={styles.form}>
@@ -122,6 +130,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.sm,
     marginBottom: spacing.xl,
+  },
+  invited: {
+    color: colors.primaryDark,
+    textAlign: 'center',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: spacing.lg,
   },
   form: { gap: spacing.md },
   hint: { color: colors.muted, textAlign: 'center' },

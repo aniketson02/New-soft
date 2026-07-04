@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,12 +18,20 @@ import { colors, spacing } from '../theme';
 type Mode = 'choose' | 'create' | 'join';
 
 export default function FamilySetupScreen() {
-  const { refreshFamily, signOut } = useAppState();
-  const [mode, setMode] = useState<Mode>('choose');
+  const { refreshFamily, signOut, pendingInvite, clearInvite } = useAppState();
+  const [mode, setMode] = useState<Mode>(pendingInvite ? 'join' : 'choose');
   const [familyName, setFamilyName] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [inviteCode, setInviteCode] = useState('');
+  const [inviteCode, setInviteCode] = useState(pendingInvite ?? '');
   const [busy, setBusy] = useState(false);
+
+  // pendingInvite resolves from storage asynchronously; adopt it whenever it lands
+  useEffect(() => {
+    if (pendingInvite) {
+      setMode('join');
+      setInviteCode(pendingInvite);
+    }
+  }, [pendingInvite]);
 
   const submit = async () => {
     if (!displayName.trim()) {
@@ -46,7 +54,10 @@ export default function FamilySetupScreen() {
       Alert.alert('Something went wrong', error.message);
       return;
     }
-    track(mode === 'create' ? 'family_created' : 'family_joined');
+    track(mode === 'create' ? 'family_created' : 'family_joined', {
+      via_link: mode === 'join' && !!pendingInvite,
+    });
+    if (mode === 'join') clearInvite();
     await refreshFamily();
   };
 
@@ -80,6 +91,12 @@ export default function FamilySetupScreen() {
       <Text style={styles.title}>
         {mode === 'create' ? 'Start a new family' : 'Join your family'}
       </Text>
+
+      {mode === 'join' && pendingInvite ? (
+        <Text style={styles.invited}>
+          🎉 You've been invited! Just add your name below.
+        </Text>
+      ) : null}
 
       <TextInput
         style={styles.input}
@@ -139,6 +156,12 @@ const styles = StyleSheet.create({
     color: colors.text,
     textAlign: 'center',
     marginBottom: spacing.md,
+  },
+  invited: {
+    color: colors.primaryDark,
+    textAlign: 'center',
+    fontSize: 15,
+    fontWeight: '600',
   },
   input: {
     backgroundColor: colors.card,
