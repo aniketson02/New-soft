@@ -199,6 +199,12 @@ export default function BoardScreen({ navigation }: Props) {
               Capture a note or a photo of a flyer and let Hearth organize it — or add
               something yourself.
             </Text>
+            <TouchableOpacity
+              style={styles.emptyCta}
+              onPress={() => navigation.navigate('Capture')}
+            >
+              <Text style={styles.emptyCtaText}>✨ Capture something</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -286,6 +292,14 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', marginTop: spacing.xl * 2, gap: spacing.sm },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
   emptyText: { color: colors.muted, textAlign: 'center', paddingHorizontal: spacing.lg },
+  emptyCta: {
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+  },
+  emptyCtaText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   section: { marginBottom: spacing.lg },
   sectionTitle: {
     fontSize: 14,

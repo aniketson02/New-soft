@@ -11,13 +11,14 @@ import AddItemScreen from './src/screens/AddItemScreen';
 import CaptureScreen from './src/screens/CaptureScreen';
 import ReviewScreen from './src/screens/ReviewScreen';
 import ListsScreen from './src/screens/ListsScreen';
+import OnboardingScreen from './src/screens/OnboardingScreen';
 import type { RootStackParamList } from './src/navigation';
 import { colors } from './src/theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function Root() {
-  const { loading, session, family } = useAppState();
+  const { loading, session, family, needsOnboarding } = useAppState();
 
   if (loading) {
     return (
@@ -32,6 +33,7 @@ function Root() {
 
   return (
     <Stack.Navigator
+      initialRouteName={needsOnboarding ? 'Onboarding' : 'Board'}
       screenOptions={{
         headerStyle: { backgroundColor: colors.background },
         headerTintColor: colors.text,
@@ -39,6 +41,11 @@ function Root() {
         contentStyle: { backgroundColor: colors.background },
       }}
     >
+      <Stack.Screen
+        name="Onboarding"
+        component={OnboardingScreen}
+        options={{ headerShown: false }}
+      />
       <Stack.Screen name="Board" component={BoardScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="AddItem"

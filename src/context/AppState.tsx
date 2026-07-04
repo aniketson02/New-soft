@@ -17,6 +17,9 @@ interface AppState {
   family: Family | null;
   member: Member | null;
   members: Member[];
+  /** True when the family has no captures and no items yet — show the
+   * guided first-capture onboarding instead of an empty board. */
+  needsOnboarding: boolean;
   refreshFamily: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -29,6 +32,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [family, setFamily] = useState<Family | null>(null);
   const [member, setMember] = useState<Member | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   const loadFamily = useCallback(async (userId: string) => {
     const { data: myMember } = await supabase
@@ -42,16 +46,26 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       setFamily(null);
       setMember(null);
       setMembers([]);
+      setNeedsOnboarding(false);
       return;
     }
 
+    const [{ data: fam }, { data: all }, { count: captureCount }, { count: itemCount }] =
+      await Promise.all([
+        supabase.from('families').select('*').eq('id', myMember.family_id).single(),
+        supabase.from('members').select('*').eq('family_id', myMember.family_id),
+        supabase
+          .from('captures')
+          .select('id', { count: 'exact', head: true })
+          .eq('family_id', myMember.family_id),
+        supabase
+          .from('items')
+          .select('id', { count: 'exact', head: true })
+          .eq('family_id', myMember.family_id),
+      ]);
+
     setMember(myMember as Member);
-
-    const [{ data: fam }, { data: all }] = await Promise.all([
-      supabase.from('families').select('*').eq('id', myMember.family_id).single(),
-      supabase.from('members').select('*').eq('family_id', myMember.family_id),
-    ]);
-
+    setNeedsOnboarding((captureCount ?? 0) === 0 && (itemCount ?? 0) === 0);
     setFamily((fam as Family) ?? null);
     setMembers((all as Member[]) ?? []);
   }, []);
@@ -87,8 +101,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ loading, session, family, member, members, refreshFamily, signOut }),
-    [loading, session, family, member, members, refreshFamily, signOut],
+    () => ({ loading, session, family, member, members, needsOnboarding, refreshFamily, signOut }),
+    [loading, session, family, member, members, needsOnboarding, refreshFamily, signOut],
   );
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;

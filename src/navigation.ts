@@ -1,4 +1,5 @@
 export type RootStackParamList = {
+  Onboarding: undefined;
   Board: undefined;
   AddItem: undefined;
   Capture: undefined;
