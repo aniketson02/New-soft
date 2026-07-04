@@ -1,5 +1,8 @@
 # Hearth — the Family Operating System
 
+**Live app:** https://aniketson02.github.io/New-soft/ (auto-deployed from this
+branch by GitHub Actions)
+
 An AI chief-of-staff for the household. Family members dump chaos in — a photo of
 a school flyer, a voice note, a pasted email — and Hearth turns it into a
 structured, shared family board: events, tasks with owners, grocery lists,
@@ -54,11 +57,18 @@ code, and start capturing.
 - **AI:** Claude API (structured tool-use extraction, text + vision) in
   `supabase/functions/extract`
 
-## Web build
+## Web deployment
 
-`npx expo export --platform web` produces a static site in `dist/`;
-`vercel.json` is included, so `vercel deploy` ships it as-is. (Not deployed
-autonomously — publishing publicly is your call.)
+Every push to this branch (or `main`) runs
+`.github/workflows/deploy-web.yml`, which builds the Expo web export and
+publishes it to **GitHub Pages** at https://aniketson02.github.io/New-soft/.
+
+Vercel was the first choice but is unreachable from this development
+environment (egress policy + no CLI credentials); `vercel.json` is kept so
+`vercel deploy` works from any machine if you prefer Vercel later. Note:
+Supabase edge functions cannot host the page — the platform rewrites HTML
+responses to `text/plain` with a sandbox CSP, so the `web` function simply
+redirects to the GitHub Pages URL.
 
 ## Project layout
 
