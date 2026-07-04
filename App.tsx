@@ -12,13 +12,14 @@ import CaptureScreen from './src/screens/CaptureScreen';
 import ReviewScreen from './src/screens/ReviewScreen';
 import ListsScreen from './src/screens/ListsScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
+import WelcomeScreen from './src/screens/WelcomeScreen';
 import type { RootStackParamList } from './src/navigation';
 import { colors } from './src/theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function Root() {
-  const { loading, session, family, needsOnboarding } = useAppState();
+  const { loading, session, family, needsOnboarding, justJoined } = useAppState();
 
   if (loading) {
     return (
@@ -33,7 +34,7 @@ function Root() {
 
   return (
     <Stack.Navigator
-      initialRouteName={needsOnboarding ? 'Onboarding' : 'Board'}
+      initialRouteName={justJoined ? 'Welcome' : needsOnboarding ? 'Onboarding' : 'Board'}
       screenOptions={{
         headerStyle: { backgroundColor: colors.background },
         headerTintColor: colors.text,
@@ -41,6 +42,11 @@ function Root() {
         contentStyle: { backgroundColor: colors.background },
       }}
     >
+      <Stack.Screen
+        name="Welcome"
+        component={WelcomeScreen}
+        options={{ headerShown: false }}
+      />
       <Stack.Screen
         name="Onboarding"
         component={OnboardingScreen}

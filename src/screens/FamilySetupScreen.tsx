@@ -18,7 +18,7 @@ import { colors, spacing } from '../theme';
 type Mode = 'choose' | 'create' | 'join';
 
 export default function FamilySetupScreen() {
-  const { refreshFamily, signOut, pendingInvite, clearInvite } = useAppState();
+  const { refreshFamily, signOut, pendingInvite, clearInvite, markJoined } = useAppState();
   const [mode, setMode] = useState<Mode>(pendingInvite ? 'join' : 'choose');
   const [familyName, setFamilyName] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -57,7 +57,10 @@ export default function FamilySetupScreen() {
     track(mode === 'create' ? 'family_created' : 'family_joined', {
       via_link: mode === 'join' && !!pendingInvite,
     });
-    if (mode === 'join') clearInvite();
+    if (mode === 'join') {
+      clearInvite();
+      markJoined();
+    }
     await refreshFamily();
   };
 

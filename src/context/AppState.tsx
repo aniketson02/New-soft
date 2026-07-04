@@ -24,6 +24,11 @@ interface AppState {
   /** Invite code captured from a ?join= link, pending until used. */
   pendingInvite: string | null;
   clearInvite: () => void;
+  /** True right after this user joined an existing family — show the
+   * one-time welcome screen instead of dropping them on the board. */
+  justJoined: boolean;
+  markJoined: () => void;
+  ackJoined: () => void;
   refreshFamily: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -47,6 +52,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     setPendingInvite(null);
     clearPendingInvite();
   }, []);
+
+  const [justJoined, setJustJoined] = useState(false);
+  const markJoined = useCallback(() => setJustJoined(true), []);
+  const ackJoined = useCallback(() => setJustJoined(false), []);
 
   const loadFamily = useCallback(async (userId: string) => {
     const { data: myMember } = await supabase
@@ -124,6 +133,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       needsOnboarding,
       pendingInvite,
       clearInvite,
+      justJoined,
+      markJoined,
+      ackJoined,
       refreshFamily,
       signOut,
     }),
@@ -136,6 +148,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       needsOnboarding,
       pendingInvite,
       clearInvite,
+      justJoined,
+      markJoined,
+      ackJoined,
       refreshFamily,
       signOut,
     ],
