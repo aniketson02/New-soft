@@ -23,7 +23,7 @@
     },
     "scheme": "hearth",
     "experiments": {
-      "baseUrl": "/New-soft"
+      "baseUrl": "/New-soft/app"
     }
   }
 }

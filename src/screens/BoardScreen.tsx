@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
+import { track } from '../lib/analytics';
 import { useAppState } from '../context/AppState';
 import Avatar from '../components/Avatar';
 import type { Item, Member } from '../types';
@@ -141,8 +142,9 @@ export default function BoardScreen({ navigation }: Props) {
 
   const shareInvite = async () => {
     if (!family) return;
+    track('invite_shared');
     await Share.share({
-      message: `Join our family space "${family.name}" on Hearth — invite code: ${family.invite_code}`,
+      message: `Join our family space "${family.name}" on Hearth — invite code: ${family.invite_code}. Open it at https://aniketson02.github.io/New-soft/`,
     });
   };
 

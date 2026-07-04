@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
+import { track } from '../lib/analytics';
 import { useAppState } from '../context/AppState';
 import type { Capture } from '../types';
 import { colors, spacing } from '../theme';
@@ -42,7 +43,8 @@ function base64ToBytes(b64: string): Uint8Array {
 }
 
 /** Fire-and-forget: ask the extraction pipeline to process a capture. */
-function triggerExtraction(captureId: string) {
+function triggerExtraction(captureId: string, kind: 'text' | 'photo') {
+  track('capture_created', { kind });
   supabase.functions.invoke('extract', { body: { capture_id: captureId } }).catch(() => {
     // The capture row's status field carries the real state; errors surface there.
   });
@@ -100,7 +102,7 @@ export default function CaptureScreen() {
       return;
     }
     setText('');
-    triggerExtraction(data.id);
+    triggerExtraction(data.id, 'text');
     loadRecent();
   };
 
@@ -154,7 +156,7 @@ export default function CaptureScreen() {
       Alert.alert('Could not save capture', error.message);
       return;
     }
-    triggerExtraction(data.id);
+    triggerExtraction(data.id, 'photo');
     loadRecent();
   };
 

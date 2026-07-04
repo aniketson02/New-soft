@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { track } from '../lib/analytics';
 import type { Family, Member } from '../types';
 
 interface AppState {
@@ -62,9 +63,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, s) => {
       setSession(s);
       if (s) {
+        if (event === 'SIGNED_IN') track('sign_in');
         await loadFamily(s.user.id);
       } else {
         setFamily(null);

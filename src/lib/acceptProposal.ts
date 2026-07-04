@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { track } from './analytics';
 import type { Member, Proposal, ProposalPayload } from '../types';
 
 function matchOwner(hint: string | undefined, members: Member[]): string | null {
@@ -58,6 +59,8 @@ export async function acceptProposal(
     source_proposal_id: proposal.id,
   });
   if (insertError) return { error: insertError.message };
+
+  track('proposal_accepted', { type: payload.type });
 
   const { error: updateError } = await supabase
     .from('proposals')

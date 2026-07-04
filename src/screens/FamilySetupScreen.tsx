@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { track } from '../lib/analytics';
 import { useAppState } from '../context/AppState';
 import { colors, spacing } from '../theme';
 
@@ -45,6 +46,7 @@ export default function FamilySetupScreen() {
       Alert.alert('Something went wrong', error.message);
       return;
     }
+    track(mode === 'create' ? 'family_created' : 'family_joined');
     await refreshFamily();
   };
 

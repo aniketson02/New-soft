@@ -22,10 +22,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx expo export --platform web --output-dir dist
-      - run: touch dist/.nojekyll
+      - run: npx expo export --platform web --output-dir site/app
+      - run: |
+          cp web/landing.html site/index.html
+          touch site/.nojekyll
       - uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
+          publish_dir: ./site
           force_orphan: true
