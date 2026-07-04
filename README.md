@@ -11,21 +11,24 @@ organizer failed, and why this one is possible now.
 
 See [PLAN.md](./PLAN.md) for the full product thesis and build plan.
 
-## Status: live backend, working app
+## Status: fully live — backend, app, and AI
 
 The Supabase backend is **provisioned and live** (project `hearth`,
 `tdmdxvnbrhdijxmefotu`, free tier): schema + RLS applied, realtime enabled,
 storage bucket ready, and the `extract` edge function deployed. The app is
 pre-configured to use it (`src/lib/config.ts`) — clone, install, run.
 
-**One step remains to switch on the AI** (needs your Anthropic API key):
+**AI extraction is switched on**, currently powered by Gemini
+(`gemini-2.5-flash`) with the API key stored in Supabase Vault and readable
+only by `service_role` (see `supabase/migrations/0003_llm_key_vault_accessor.sql`).
+Verified end-to-end: a pasted family note produced correctly typed proposals
+with resolved dates, recurrence rules, owners, and grocery-list routing.
+
+To switch to Claude later, set the Anthropic key — it takes precedence:
 
 ```sh
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-... --project-ref tdmdxvnbrhdijxmefotu
 ```
-
-Until then, captures are stored and the app shows a friendly "AI is not
-configured yet" note on each capture (verified end-to-end).
 
 ## Run it
 

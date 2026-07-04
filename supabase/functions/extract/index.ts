@@ -3,61 +3,43 @@
 // Invoked directly from the app after a capture is created
 // (supabase.functions.invoke('extract', { body: { capture_id } })), and also
 // compatible with a Database Webhook payload ({ record }). Reads the raw
-// capture (text or photo), asks Claude to extract structured
+// capture (text or photo), asks an LLM to extract structured
 // events/tasks/list entries, and writes them to `proposals` for one-tap
 // review in the app.
 //
-// Required secrets (supabase secrets set):
-//   ANTHROPIC_API_KEY  — Claude API key
+// Provider selection:
+//   1. ANTHROPIC_API_KEY secret set  → Claude (tool-use extraction)
+//   2. otherwise                     → Gemini, key read from Supabase Vault
+//                                      via the service-role-only get_llm_key()
 //
 // Deploy: supabase functions deploy extract
 
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient, SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
-const EXTRACTION_TOOL = {
-  name: 'record_extracted_items',
-  description:
-    'Record the events, tasks, and shopping/list entries found in a family note, message, or photographed flyer.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      items: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            type: { type: 'string', enum: ['event', 'task', 'list_entry'] },
-            title: { type: 'string', description: 'Short, action-oriented title' },
-            notes: { type: 'string' },
-            due_at: {
-              type: 'string',
-              description: 'ISO 8601 datetime if a date/time is stated or clearly implied',
-            },
-            recurrence: {
-              type: 'string',
-              description: 'iCal RRULE if the item repeats (e.g. FREQ=WEEKLY;BYDAY=TH)',
-            },
-            owner_hint: {
-              type: 'string',
-              description: 'Name of the family member who should own this, if mentioned',
-            },
-            list_name: {
-              type: 'string',
-              description: 'For list_entry items: which list (e.g. Groceries)',
-            },
-          },
-          required: ['type', 'title'],
-        },
-      },
-    },
-    required: ['items'],
-  },
-} as const;
+interface ExtractedItem {
+  type: 'event' | 'task' | 'list_entry';
+  title: string;
+  notes?: string;
+  due_at?: string;
+  recurrence?: string;
+  owner_hint?: string;
+  list_name?: string;
+}
+
+const ITEM_FIELDS = {
+  type: 'event | task | list_entry',
+  title: 'short, action-oriented title',
+  notes: 'optional details',
+  due_at: 'ISO 8601 datetime if a date/time is stated or clearly implied',
+  recurrence: 'iCal RRULE if the item repeats (e.g. FREQ=WEEKLY;BYDAY=TH)',
+  owner_hint: 'name of the family member who should own this, if mentioned',
+  list_name: 'for list_entry items: which list (e.g. Groceries)',
+};
 
 const INSTRUCTIONS = (now: string) =>
   `Today is ${now}. Extract every concrete event, task, and shopping/list item ` +
   `from this family note or photo. Resolve relative dates ("next Thursday") to ` +
-  `ISO datetimes. Do not invent items. If there is nothing actionable, record an empty list.`;
+  `ISO datetimes. Do not invent items. Return an empty list if nothing is actionable.`;
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -67,6 +49,140 @@ function bytesToBase64(bytes: Uint8Array): string {
   }
   return btoa(binary);
 }
+
+// ---------------------------------------------------------------------------
+// Providers
+// ---------------------------------------------------------------------------
+
+async function extractWithClaude(
+  apiKey: string,
+  text: string | null,
+  imageB64: string | null,
+): Promise<ExtractedItem[]> {
+  const tool = {
+    name: 'record_extracted_items',
+    description: 'Record the events, tasks, and list entries found in the input.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: Object.fromEntries(
+              Object.entries(ITEM_FIELDS).map(([k, d]) => [
+                k,
+                k === 'type'
+                  ? { type: 'string', enum: ['event', 'task', 'list_entry'] }
+                  : { type: 'string', description: d },
+              ]),
+            ),
+            required: ['type', 'title'],
+          },
+        },
+      },
+      required: ['items'],
+    },
+  };
+
+  const content = imageB64
+    ? [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageB64 } },
+        { type: 'text', text: INSTRUCTIONS(new Date().toISOString()) },
+      ]
+    : `${INSTRUCTIONS(new Date().toISOString())}\n\n---\n${text}`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-5',
+      max_tokens: 2048,
+      tools: [tool],
+      tool_choice: { type: 'tool', name: 'record_extracted_items' },
+      messages: [{ role: 'user', content }],
+    }),
+  });
+  if (!response.ok) throw new Error(`Claude API ${response.status}: ${await response.text()}`);
+
+  const message = await response.json();
+  const toolUse = message.content?.find((b: { type: string }) => b.type === 'tool_use');
+  return toolUse?.input?.items ?? [];
+}
+
+async function extractWithGemini(
+  apiKey: string,
+  text: string | null,
+  imageB64: string | null,
+): Promise<ExtractedItem[]> {
+  const parts: unknown[] = [];
+  if (imageB64) parts.push({ inline_data: { mime_type: 'image/jpeg', data: imageB64 } });
+  parts.push({
+    text: imageB64
+      ? INSTRUCTIONS(new Date().toISOString())
+      : `${INSTRUCTIONS(new Date().toISOString())}\n\n---\n${text}`,
+  });
+
+  const response = await fetch(
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: Object.fromEntries(
+                Object.entries(ITEM_FIELDS).map(([k, d]) => [
+                  k,
+                  k === 'type'
+                    ? { type: 'STRING', enum: ['event', 'task', 'list_entry'] }
+                    : { type: 'STRING', description: d },
+                ]),
+              ),
+              required: ['type', 'title'],
+            },
+          },
+        },
+      }),
+    },
+  );
+  if (!response.ok) throw new Error(`Gemini API ${response.status}: ${await response.text()}`);
+
+  const message = await response.json();
+  const jsonText = message.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!jsonText) return [];
+  const parsed = JSON.parse(jsonText);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+async function resolveProvider(
+  supabase: SupabaseClient,
+): Promise<{ run: (text: string | null, img: string | null) => Promise<ExtractedItem[]> }> {
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (anthropicKey) {
+    return { run: (t, i) => extractWithClaude(anthropicKey, t, i) };
+  }
+  const { data: vaultKey, error } = await supabase.rpc('get_llm_key');
+  if (error || !vaultKey) {
+    throw new Error(
+      'AI is not configured yet: set the ANTHROPIC_API_KEY secret or store a Gemini key in Vault as llm_api_key',
+    );
+  }
+  return { run: (t, i) => extractWithGemini(vaultKey, t, i) };
+}
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
 
 Deno.serve(async (req) => {
   const supabase = createClient(
@@ -94,19 +210,17 @@ Deno.serve(async (req) => {
     });
   }
 
-  await supabase.from('captures').update({ status: 'processing', error: null }).eq('id', capture.id);
+  await supabase
+    .from('captures')
+    .update({ status: 'processing', error: null })
+    .eq('id', capture.id);
 
   try {
-    const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
-    if (!apiKey) {
-      throw new Error(
-        'AI is not configured yet: run `supabase secrets set ANTHROPIC_API_KEY=...`',
-      );
-    }
+    let text: string | null = null;
+    let imageB64: string | null = null;
 
-    let userContent: unknown;
     if (capture.kind === 'text' && capture.text_content) {
-      userContent = `${INSTRUCTIONS(new Date().toISOString())}\n\n---\n${capture.text_content}`;
+      text = capture.text_content;
     } else if (capture.kind === 'photo' && capture.storage_path) {
       const { data: file, error: downloadError } = await supabase.storage
         .from('captures')
@@ -114,41 +228,15 @@ Deno.serve(async (req) => {
       if (downloadError || !file) {
         throw new Error(`could not download photo: ${downloadError?.message}`);
       }
-      const base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
-      userContent = [
-        {
-          type: 'image',
-          source: { type: 'base64', media_type: 'image/jpeg', data: base64 },
-        },
-        { type: 'text', text: INSTRUCTIONS(new Date().toISOString()) },
-      ];
+      imageB64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
     } else {
       throw new Error(`capture kind "${capture.kind}" not supported yet`);
     }
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-5',
-        max_tokens: 2048,
-        tools: [EXTRACTION_TOOL],
-        tool_choice: { type: 'tool', name: 'record_extracted_items' },
-        messages: [{ role: 'user', content: userContent }],
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Claude API ${response.status}: ${await response.text()}`);
-    }
-
-    const message = await response.json();
-    const toolUse = message.content?.find((b: { type: string }) => b.type === 'tool_use');
-    const items: Record<string, unknown>[] = toolUse?.input?.items ?? [];
+    const provider = await resolveProvider(supabase);
+    const items = (await provider.run(text, imageB64)).filter(
+      (i) => i && typeof i.title === 'string' && ['event', 'task', 'list_entry'].includes(i.type),
+    );
 
     if (items.length > 0) {
       const { error } = await supabase.from('proposals').insert(
