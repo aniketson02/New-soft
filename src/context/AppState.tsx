@@ -10,7 +10,7 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { track } from '../lib/analytics';
 import { captureInviteFromUrl, clearPendingInvite } from '../lib/inviteLink';
-import type { Family, Member } from '../types';
+import type { Family, Member, Usage } from '../types';
 
 interface AppState {
   loading: boolean;
@@ -29,6 +29,9 @@ interface AppState {
   justJoined: boolean;
   markJoined: () => void;
   ackJoined: () => void;
+  /** Current-month AI usage + plan for this family. */
+  usage: Usage | null;
+  refreshUsage: () => Promise<void>;
   refreshFamily: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -57,6 +60,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const markJoined = useCallback(() => setJustJoined(true), []);
   const ackJoined = useCallback(() => setJustJoined(false), []);
 
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const refreshUsage = useCallback(async () => {
+    const { data } = await supabase.rpc('get_usage');
+    setUsage((data as Usage) ?? null);
+  }, []);
+
   const loadFamily = useCallback(async (userId: string) => {
     const { data: myMember } = await supabase
       .from('members')
@@ -70,6 +79,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       setMember(null);
       setMembers([]);
       setNeedsOnboarding(false);
+      setUsage(null);
       return;
     }
 
@@ -91,7 +101,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     setNeedsOnboarding((captureCount ?? 0) === 0 && (itemCount ?? 0) === 0);
     setFamily((fam as Family) ?? null);
     setMembers((all as Member[]) ?? []);
-  }, []);
+    refreshUsage();
+  }, [refreshUsage]);
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
@@ -136,6 +147,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       justJoined,
       markJoined,
       ackJoined,
+      usage,
+      refreshUsage,
       refreshFamily,
       signOut,
     }),
@@ -151,6 +164,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       justJoined,
       markJoined,
       ackJoined,
+      usage,
+      refreshUsage,
       refreshFamily,
       signOut,
     ],

@@ -6,4 +6,5 @@ export type RootStackParamList = {
   Capture: undefined;
   Review: undefined;
   Lists: undefined;
+  Paywall: undefined;
 };

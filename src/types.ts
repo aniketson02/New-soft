@@ -75,3 +75,11 @@ export interface Proposal {
   status: ProposalStatus;
   created_at: string;
 }
+
+export interface Usage {
+  plan: 'free' | 'premium';
+  used: number;
+  limit: number | null; // null when premium (unlimited)
+  remaining: number | null;
+  period_end: string;
+}

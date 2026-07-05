@@ -66,7 +66,7 @@ function owner(item: Item, members: Member[]): Member | null {
 }
 
 export default function BoardScreen({ navigation }: Props) {
-  const { family, member, members, signOut } = useAppState();
+  const { family, member, members, usage, refreshUsage, signOut } = useAppState();
   const [items, setItems] = useState<Item[]>([]);
   const [pendingReviews, setPendingReviews] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -117,11 +117,14 @@ export default function BoardScreen({ navigation }: Props) {
     };
   }, [family, load]);
 
-  // Reload when returning from modal screens (accept/dismiss/add).
+  // Reload when returning from modal screens (accept/dismiss/add/capture).
   useEffect(() => {
-    const unsub = navigation.addListener('focus', load);
+    const unsub = navigation.addListener('focus', () => {
+      load();
+      refreshUsage();
+    });
     return unsub;
-  }, [navigation, load]);
+  }, [navigation, load, refreshUsage]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -188,6 +191,17 @@ export default function BoardScreen({ navigation }: Props) {
             ✨ Hearth organized {pendingReviews} {pendingReviews === 1 ? 'thing' : 'things'} for
             you — tap to review
           </Text>
+        </TouchableOpacity>
+      )}
+
+      {usage && usage.plan === 'free' && usage.remaining !== null && (
+        <TouchableOpacity style={styles.meter} onPress={() => navigation.navigate('Paywall')}>
+          <Text style={styles.meterText}>
+            {usage.remaining > 0
+              ? `${usage.remaining} of ${usage.limit} free AI captures left this month`
+              : 'Free AI captures used up this month'}
+          </Text>
+          <Text style={styles.meterCta}>Upgrade →</Text>
         </TouchableOpacity>
       )}
 
@@ -291,6 +305,21 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   bannerText: { color: '#fff', fontWeight: '700', textAlign: 'center' },
+  meter: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  meterText: { color: colors.muted, fontSize: 13, flex: 1 },
+  meterCta: { color: colors.primaryDark, fontWeight: '700', fontSize: 13 },
   scroll: { flex: 1, paddingHorizontal: spacing.md },
   empty: { alignItems: 'center', marginTop: spacing.xl * 2, gap: spacing.sm },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: colors.text },

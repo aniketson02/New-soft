@@ -13,6 +13,7 @@ import ReviewScreen from './src/screens/ReviewScreen';
 import ListsScreen from './src/screens/ListsScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import WelcomeScreen from './src/screens/WelcomeScreen';
+import PaywallScreen from './src/screens/PaywallScreen';
 import type { RootStackParamList } from './src/navigation';
 import { colors } from './src/theme';
 
@@ -69,6 +70,11 @@ function Root() {
         options={{ title: 'Review suggestions' }}
       />
       <Stack.Screen name="Lists" component={ListsScreen} options={{ title: 'Lists' }} />
+      <Stack.Screen
+        name="Paywall"
+        component={PaywallScreen}
+        options={{ title: 'Hearth Premium', presentation: 'modal' }}
+      />
     </Stack.Navigator>
   );
 }

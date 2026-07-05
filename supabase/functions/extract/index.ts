@@ -216,6 +216,31 @@ Deno.serve(async (req) => {
     .eq('id', capture.id);
 
   try {
+    // Metering gate: free families get FREE_LIMIT AI captures per calendar
+    // month. Enforced here, server-side, before any LLM spend. The app
+    // recognizes the FREE_LIMIT_REACHED marker and shows the paywall.
+    const FREE_LIMIT = 15;
+    const { data: fam } = await supabase
+      .from('families')
+      .select('plan')
+      .eq('id', capture.family_id)
+      .single();
+    if (fam && fam.plan !== 'premium') {
+      const monthStart = new Date(
+        Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1),
+      ).toISOString();
+      const { count } = await supabase
+        .from('captures')
+        .select('id', { count: 'exact', head: true })
+        .eq('family_id', capture.family_id)
+        .gte('created_at', monthStart)
+        .neq('status', 'error')
+        .neq('id', capture.id);
+      if ((count ?? 0) >= FREE_LIMIT) {
+        throw new Error('FREE_LIMIT_REACHED');
+      }
+    }
+
     let text: string | null = null;
     let imageB64: string | null = null;
 

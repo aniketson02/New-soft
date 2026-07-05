@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,11 +10,15 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import { track } from '../lib/analytics';
 import { useAppState } from '../context/AppState';
 import type { Capture } from '../types';
 import { colors, spacing } from '../theme';
+import type { RootStackParamList } from '../navigation';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'Capture'>;
 
 const STATUS_LABEL: Record<Capture['status'], string> = {
   pending: 'Waiting for Hearth…',
@@ -50,11 +54,12 @@ function triggerExtraction(captureId: string, kind: 'text' | 'photo') {
   });
 }
 
-export default function CaptureScreen() {
-  const { family, session } = useAppState();
+export default function CaptureScreen({ navigation }: Props) {
+  const { family, session, refreshUsage } = useAppState();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [recent, setRecent] = useState<Capture[]>([]);
+  const paywalledRef = useRef(false);
 
   const loadRecent = useCallback(async () => {
     if (!family) return;
@@ -64,8 +69,19 @@ export default function CaptureScreen() {
       .eq('family_id', family.id)
       .order('created_at', { ascending: false })
       .limit(10);
-    setRecent((data as Capture[]) ?? []);
-  }, [family]);
+    const rows = (data as Capture[]) ?? [];
+    setRecent(rows);
+    // Hitting the free monthly cap surfaces the paywall (once).
+    if (
+      !paywalledRef.current &&
+      rows.some((c) => c.status === 'error' && c.error === 'FREE_LIMIT_REACHED')
+    ) {
+      paywalledRef.current = true;
+      track('limit_reached');
+      refreshUsage();
+      navigation.navigate('Paywall');
+    }
+  }, [family, navigation, refreshUsage]);
 
   useEffect(() => {
     loadRecent();
@@ -217,8 +233,10 @@ export default function CaptureScreen() {
                   c.status === 'error' && { color: colors.danger },
                 ]}
               >
-                {STATUS_LABEL[c.status]}
-                {c.status === 'error' && c.error ? ` — ${c.error}` : ''}
+                {c.status === 'error' && c.error === 'FREE_LIMIT_REACHED'
+                  ? 'Monthly free limit reached — tap Upgrade'
+                  : STATUS_LABEL[c.status] +
+                    (c.status === 'error' && c.error ? ` — ${c.error}` : '')}
               </Text>
             </View>
           ))}
