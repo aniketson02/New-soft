@@ -13,6 +13,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import { track } from '../lib/analytics';
 import { inviteUrl } from '../lib/inviteLink';
+import { getLastSeen, setLastSeen } from '../lib/lastSeen';
 import { useAppState } from '../context/AppState';
 import Avatar from '../components/Avatar';
 import type { Item, Member } from '../types';
@@ -66,10 +67,11 @@ function owner(item: Item, members: Member[]): Member | null {
 }
 
 export default function BoardScreen({ navigation }: Props) {
-  const { family, member, members, usage, refreshUsage, signOut } = useAppState();
+  const { family, member, members, session, usage, refreshUsage, signOut } = useAppState();
   const [items, setItems] = useState<Item[]>([]);
   const [pendingReviews, setPendingReviews] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [recap, setRecap] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!family) return;
@@ -125,6 +127,64 @@ export default function BoardScreen({ navigation }: Props) {
     });
     return unsub;
   }, [navigation, load, refreshUsage]);
+
+  // "While you were away" recap: what other family members did since this
+  // user last opened the board. Computed once on mount, then the marker is
+  // advanced so it won't re-fire this session.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!family || !session) return;
+      const uid = session.user.id;
+      const last = await getLastSeen(uid);
+      await setLastSeen(uid, new Date().toISOString());
+      if (!last) return; // first-ever visit — nothing to recap
+
+      const [{ data: newItems }, { data: newMembers }] = await Promise.all([
+        supabase
+          .from('items')
+          .select('created_by')
+          .eq('family_id', family.id)
+          .gt('created_at', last)
+          .neq('created_by', uid)
+          .not('created_by', 'is', null),
+        supabase
+          .from('members')
+          .select('display_name, user_id')
+          .eq('family_id', family.id)
+          .gt('created_at', last)
+          .neq('user_id', uid),
+      ]);
+
+      const parts: string[] = [];
+      const added = (newItems as { created_by: string }[]) ?? [];
+      if (added.length > 0) {
+        const byUser = new Map<string, number>();
+        for (const it of added) byUser.set(it.created_by, (byUser.get(it.created_by) ?? 0) + 1);
+        parts.push(
+          [...byUser.entries()]
+            .map(([cb, n]) => {
+              const name = members.find((m) => m.user_id === cb)?.display_name ?? 'Someone';
+              return `${name} added ${n} ${n === 1 ? 'thing' : 'things'}`;
+            })
+            .join(', '),
+        );
+      }
+      const joiners = ((newMembers as { display_name: string }[]) ?? []).map((m) => m.display_name);
+      if (joiners.length > 0) {
+        parts.push(`${joiners.join(' & ')} joined the family`);
+      }
+
+      if (parts.length > 0 && !cancelled) {
+        setRecap(parts.join(' · '));
+        track('recap_shown');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -184,6 +244,20 @@ export default function BoardScreen({ navigation }: Props) {
           </TouchableOpacity>
         </View>
       </View>
+
+      {recap && (
+        <View style={styles.recap}>
+          <Text style={styles.recapText}>👋 While you were away — {recap}</Text>
+          <TouchableOpacity
+            onPress={() => {
+              setRecap(null);
+              track('recap_dismissed');
+            }}
+          >
+            <Text style={styles.recapDismiss}>Got it</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {pendingReviews > 0 && (
         <TouchableOpacity style={styles.banner} onPress={() => navigation.navigate('Review')}>
@@ -305,6 +379,20 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   bannerText: { color: '#fff', fontWeight: '700', textAlign: 'center' },
+  recap: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.card,
+    borderColor: colors.primary,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  recapText: { flex: 1, color: colors.text, fontSize: 14, lineHeight: 20 },
+  recapDismiss: { color: colors.primaryDark, fontWeight: '700', fontSize: 13 },
   meter: {
     marginHorizontal: spacing.md,
     marginBottom: spacing.sm,
