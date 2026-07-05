@@ -38,15 +38,45 @@ export default function AuthScreen() {
     setCodeSent(true);
   };
 
+  /** Pull the token_hash (and type) out of a pasted Supabase magic-link URL,
+   * if that's what the user got instead of a 6-digit code. */
+  const parseMagicLink = (
+    value: string,
+  ): { tokenHash: string; type: 'magiclink' | 'email' } | null => {
+    if (!value.includes('http')) return null;
+    try {
+      const url = new URL(value.trim());
+      const tokenHash = url.searchParams.get('token') || url.searchParams.get('token_hash');
+      if (!tokenHash) return null;
+      const type = url.searchParams.get('type') === 'magiclink' ? 'magiclink' : 'email';
+      return { tokenHash, type };
+    } catch {
+      return null;
+    }
+  };
+
   const verifyCode = async () => {
+    const input = code.trim();
+    if (!input) {
+      Alert.alert('Enter the code or paste the link from your email');
+      return;
+    }
     setBusy(true);
-    const { error } = await supabase.auth.verifyOtp({
-      email: email.trim().toLowerCase(),
-      token: code.trim(),
-      type: 'email',
-    });
+    const link = parseMagicLink(input);
+    const { error } = link
+      ? await supabase.auth.verifyOtp({ token_hash: link.tokenHash, type: link.type })
+      : await supabase.auth.verifyOtp({
+          email: email.trim().toLowerCase(),
+          token: input,
+          type: 'email',
+        });
     setBusy(false);
-    if (error) Alert.alert('Invalid code', error.message);
+    if (error) {
+      Alert.alert(
+        'Could not sign you in',
+        `${error.message}\n\nTip: open your email and either type the 6-digit code, or copy the whole "Log In" link and paste it here.`,
+      );
+    }
   };
 
   return (
@@ -85,13 +115,16 @@ export default function AuthScreen() {
         </View>
       ) : (
         <View style={styles.form}>
-          <Text style={styles.hint}>We emailed a 6-digit code to {email.trim()}.</Text>
+          <Text style={styles.hint}>
+            Check {email.trim()} — enter the 6-digit code, or paste the sign-in
+            link from the email.
+          </Text>
           <TextInput
             style={styles.input}
-            placeholder="123456"
+            placeholder="123456 — or paste the link"
             placeholderTextColor={colors.muted}
-            keyboardType="number-pad"
-            maxLength={6}
+            autoCapitalize="none"
+            autoCorrect={false}
             value={code}
             onChangeText={setCode}
           />
